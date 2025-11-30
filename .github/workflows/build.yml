@@ -1,0 +1,56 @@
+name: Build Release Binaries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux
+            ext: ""
+          - os: windows-latest
+            name: windows
+            ext: ".exe"
+          - os: macos-latest
+            name: macos
+            ext: ""
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build with PyInstaller
+      run: |
+        pyinstaller --clean psntool.spec
+
+    - name: Create distribution directory and rename binary
+      run: |
+        mkdir dist-${{ matrix.name }}
+        mv dist/psntool${{ matrix.ext }} dist-${{ matrix.name }}/psntool-${{ matrix.name }}${{ matrix.ext }}
+
+    - name: Upload binaries to release
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist-${{ matrix.name }}/psntool-${{ matrix.name }}${{ matrix.ext }}
+        asset_name: psntool-${{ matrix.name }}-v${{ github.event.release.tag_name }}${{ matrix.ext }}
+        asset_content_type: application/octet-stream

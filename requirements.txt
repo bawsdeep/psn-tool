@@ -1,0 +1,5 @@
+psnawp
+pycountry
+requests
+pyrate-limiter
+PySide6>=6.10.0
