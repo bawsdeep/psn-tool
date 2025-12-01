@@ -36,6 +36,14 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
+    - name: Debug - List files
+      run: |
+        pwd
+        ls -la
+        echo "---"
+        echo "Checking for spec file:"
+        ls -la *.spec || echo "No spec files found"
+
     - name: Build with PyInstaller
       run: |
         pyinstaller psntool.spec
