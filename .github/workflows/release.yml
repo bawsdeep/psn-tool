@@ -14,7 +14,7 @@ on:
         default: false
 
 jobs:
-  build-and-release:
+  build-linux:
     runs-on: ubuntu-latest
 
     steps:
@@ -98,7 +98,7 @@ jobs:
         export QT_DEBUG_PLUGINS=0
         pyinstaller psntool.spec
 
-    - name: Prepare release assets
+    - name: Prepare release assets (Linux)
       run: |
         # Make binary executable
         chmod +x dist/psntool
@@ -110,6 +110,78 @@ jobs:
         # Show binary info
         ls -lh psntool
         file psntool
+
+    - name: Upload Linux build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: psntool-linux
+        path: |
+          dist/psntool
+          dist/psntool.sha256
+        if-no-files-found: warn
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build with PyInstaller
+      run: |
+        # Build in headless environment - runtime hook will handle platform detection
+        pyinstaller psntool.spec
+
+    - name: Prepare release assets (Windows)
+      run: |
+        # Create checksums
+        Push-Location dist
+        try {
+          $hash = Get-FileHash -Path "psntool.exe" -Algorithm SHA256
+          $hash.Hash.ToLower() | Out-File -FilePath "psntool.exe.sha256" -Encoding ASCII
+        } finally {
+          Pop-Location
+        }
+
+        # Show binary info
+        Get-Item "dist/psntool.exe" | Select-Object Name, Length, LastWriteTime
+
+    - name: Upload Windows build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: psntool-windows
+        path: |
+          dist/psntool.exe
+          dist/psntool.exe.sha256
+        if-no-files-found: warn
+
+  create-release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Download Linux artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: psntool-linux
+        path: artifacts/linux/
+
+    - name: Download Windows artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: psntool-windows
+        path: artifacts/windows/
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
@@ -123,16 +195,23 @@ jobs:
 
           ### Downloads
           - **Linux**: `psntool` (statically linked binary)
-          - Compatible with most Linux distributions
+          - **Windows**: `psntool.exe` (portable executable)
 
           ### Installation
+
+          **Linux:**
           1. Download the `psntool` binary
           2. Make it executable: `chmod +x psntool`
           3. Run: `./psntool`
 
+          **Windows:**
+          1. Download the `psntool.exe` file
+          2. Run the executable directly (no installation required)
+
           ### Requirements
-          - Linux with X11 or Wayland display server
-          - No additional dependencies required (statically linked)
+          - **Linux**: Linux with X11 or Wayland display server
+          - **Windows**: Windows 10 or later
+          - No additional dependencies required
 
           ### Features
           - Modern PySide6 GUI interface
@@ -141,8 +220,10 @@ jobs:
           - Games library viewing
           - User search functionality
         files: |
-          dist/psntool
-          dist/psntool.sha256
+          artifacts/linux/psntool
+          artifacts/linux/psntool.sha256
+          artifacts/windows/psntool.exe
+          artifacts/windows/psntool.exe.sha256
         prerelease: ${{ inputs.prerelease }}
         draft: false
         generate_release_notes: true

@@ -150,7 +150,13 @@ class SearchUI:
         result_widget = QWidget()
         result_layout = QHBoxLayout(result_widget)
 
-        # Profile picture
+        # Profile picture container for better alignment
+        picture_container = QWidget()
+        picture_container.setFixedSize(80, 80)
+        picture_layout = QVBoxLayout(picture_container)
+        picture_layout.setContentsMargins(0, 0, 0, 0)
+        picture_layout.setSpacing(0)
+
         picture_label = QLabel()
         picture_label.setFixedSize(80, 80)
         picture_label.setStyleSheet("border: 2px solid #ccc; border-radius: 5px;")
@@ -161,7 +167,8 @@ class SearchUI:
         if hasattr(profile, 'avatar_url') and profile.avatar_url and self.image_load_callback and self.image_error_callback:
             self.image_load_callback(profile.avatar_url, picture_label)
 
-        result_layout.addWidget(picture_label)
+        picture_layout.addWidget(picture_label)
+        result_layout.addWidget(picture_container, alignment=Qt.AlignTop)
 
         # Profile info
         info_widget = QWidget()
