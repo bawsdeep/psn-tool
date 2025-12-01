@@ -6,9 +6,12 @@ This ensures the application works in both GUI and headless environments.
 import os
 import sys
 
-# Set Qt platform to offscreen if no display is available
-if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
-    os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+# Force Qt to use offscreen platform to avoid X11 dependencies
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+
+# Disable Qt plugins that require X11
+os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = ''
+os.environ['QT_DEBUG_PLUGINS'] = '0'
 
 # Ensure XDG_RUNTIME_DIR is set for Qt
 if not os.environ.get('XDG_RUNTIME_DIR'):
@@ -24,3 +27,9 @@ if not os.path.exists(runtime_dir):
         import tempfile
         runtime_dir = tempfile.mkdtemp(prefix='qt-runtime-')
         os.environ['XDG_RUNTIME_DIR'] = runtime_dir
+
+# Force offscreen platform even if other environment variables are set
+if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
+    # In CI/headless environments, force offscreen regardless
+    if 'GITHUB_ACTIONS' in os.environ or not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+        os.environ['QT_QPA_PLATFORM'] = 'offscreen'

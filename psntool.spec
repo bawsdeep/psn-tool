@@ -31,8 +31,14 @@ a = Analysis(
         # Platform-specific imports
         'PySide6.QtWaylandClient',  # For Wayland support
     ],
-    hookspath=[],
-    hooksconfig={},
+    hookspath=['.'],  # Include current directory for custom hooks
+    hooksconfig={
+        # Configure PySide6 hook to exclude problematic plugins
+        'pyside6': {
+            'exclude_plugins': ['xcb', 'xcbgl', 'xcbqpa'],
+            'force_platform': 'offscreen'
+        }
+    },
     runtime_hooks=[
         'qt_platform_hook.py',  # Custom runtime hook for Qt platform setup
     ],
@@ -43,12 +49,15 @@ a = Analysis(
         'pdb',
         'pydoc',
         'test',
-        # Exclude Qt plugins that require X11 libraries in headless environments
+        # Exclude Qt modules that require X11 libraries in headless environments
         'PySide6.QtQml',
         'PySide6.QtQuick',
         'PySide6.QtWebEngine',
         'PySide6.QtWebEngineCore',
         'PySide6.QtWebEngineWidgets',
+        # Exclude X11-specific Qt platform plugins
+        'PySide6.QtGui.xcbqpa',
+        'PySide6.QtGui.libQt6XcbQpa',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

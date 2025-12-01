@@ -94,6 +94,10 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
+        # Force Qt to use offscreen platform to avoid X11 dependencies
+        export QT_QPA_PLATFORM=offscreen
+        export QT_DEBUG_PLUGINS=0
+        export QT_QPA_PLATFORM_PLUGIN_PATH=""
         pyinstaller psntool.spec
 
     - name: Prepare release assets
