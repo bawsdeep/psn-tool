@@ -22,12 +22,20 @@ a = Analysis(
         'PySide6.QtWidgets',
         'PySide6.QtNetwork',
         'PySide6.QtDBus',  # Linux-specific
+        # Additional Qt modules
+        'PySide6.QtPrintSupport',
+        'PySide6.QtOpenGL',
         # Other potential hidden imports
         'shiboken6',
+        'shiboken6.Shiboken',
+        # Platform-specific imports
+        'PySide6.QtWaylandClient',  # For Wayland support
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[
+        'qt_platform_hook.py',  # Custom runtime hook for Qt platform setup
+    ],
     excludes=[
         # Exclude unnecessary modules to reduce size
         'tkinter',
@@ -35,6 +43,12 @@ a = Analysis(
         'pdb',
         'pydoc',
         'test',
+        # Exclude Qt plugins that require X11 libraries in headless environments
+        'PySide6.QtQml',
+        'PySide6.QtQuick',
+        'PySide6.QtWebEngine',
+        'PySide6.QtWebEngineCore',
+        'PySide6.QtWebEngineWidgets',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -55,7 +69,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,  # UPX disabled for Linux builds
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,  # Hide console window for GUI app

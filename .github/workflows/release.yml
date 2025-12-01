@@ -1,14 +1,20 @@
-name: Build PSN Tool
+name: Release PSN Tool
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
-  build:
+  build-and-release:
     runs-on: ubuntu-latest
 
     steps:
@@ -90,18 +96,53 @@ jobs:
       run: |
         pyinstaller psntool.spec
 
-    - name: Make binary executable and show info
+    - name: Prepare release assets
       run: |
-        if [ -f "dist/psntool" ]; then
-          chmod +x dist/psntool
-          ls -lh dist/psntool
-          file dist/psntool
-        fi
+        # Make binary executable
+        chmod +x dist/psntool
 
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+        # Create checksums
+        cd dist
+        sha256sum psntool > psntool.sha256
+
+        # Show binary info
+        ls -lh psntool
+        file psntool
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
       with:
-        name: psntool-linux
-        path: |
+        tag_name: ${{ inputs.version }}
+        name: PSN Tool ${{ inputs.version }}
+        body: |
+          ## PSN Tool ${{ inputs.version }}
+
+          A modern GUI application for PlayStation Network data exploration.
+
+          ### Downloads
+          - **Linux**: `psntool` (statically linked binary)
+          - Compatible with most Linux distributions
+
+          ### Installation
+          1. Download the `psntool` binary
+          2. Make it executable: `chmod +x psntool`
+          3. Run: `./psntool`
+
+          ### Requirements
+          - Linux with X11 or Wayland display server
+          - No additional dependencies required (statically linked)
+
+          ### Features
+          - Modern PySide6 GUI interface
+          - Profile management and trophy tracking
+          - Friends list browsing
+          - Games library viewing
+          - User search functionality
+        files: |
           dist/psntool
-        if-no-files-found: warn
+          dist/psntool.sha256
+        prerelease: ${{ inputs.prerelease }}
+        draft: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
