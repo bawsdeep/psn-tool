@@ -135,8 +135,7 @@ class FriendsLoaderThread(QThread):
     def run(self):
         """Load friends list."""
         try:
-            self.progress.emit("Loading friends list from PSN...")
-            friends = self.friends_cog.get_friends_list(limit=self.limit)
+            friends = self.friends_cog.get_friends_list(limit=self.limit, progress_callback=self.progress.emit)
             self.finished.emit(friends)
         except Exception as e:
             self.error.emit(f"Error loading friends: {str(e)}")
@@ -539,6 +538,7 @@ class MainWindow(QMainWindow):
         loader.finished.connect(self.on_profile_picture_loaded)
         loader.error.connect(self.on_profile_picture_error)
         self.track_thread(loader)
+
         loader.start()
 
     def load_search_picture(self, url: str, label: QLabel):

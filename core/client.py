@@ -22,6 +22,21 @@ from models import TrophyData, GameData, UserProfile
 
 logger = logging.getLogger(__name__)
 
+# Performance monitoring
+_request_times: Dict[str, float] = {}
+
+def _time_operation(operation_name: str):
+    """Decorator to time operations for performance monitoring."""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            result = func(*args, **kwargs)
+            elapsed = time.time() - start_time
+            logger.debug(f"{operation_name} completed in {elapsed:.2f} seconds")
+            return result
+        return wrapper
+    return decorator
+
 
 class PSNClient:
     """Command-line PSN API client."""
@@ -39,6 +54,7 @@ class PSNClient:
         stored_npsso = get_npsso_token()
         if stored_npsso or npsso:
             token_to_use = npsso or stored_npsso
+            # Let PSNAWP handle its own rate limiting (20 req/min = 300 per 15 min)
             self.authenticate(token_to_use)
         else:
             logger.info("No NPSSO token found. Use --setup or set_npsso() to configure.")
@@ -90,15 +106,20 @@ class PSNClient:
         return self.psnawp is not None
 
     def get_my_profile(self, include_trophies: bool = True, skip_avatars: bool = False) -> Optional[UserProfile]:
-        """Get current user's profile information with caching."""
+        """Get current user's profile information (always fresh - no caching)."""
         if not self.is_authenticated():
             logger.error("Not authenticated. Please set NPSSO token first.")
             return None
 
-        # Check cache first
-        cache_key = f"profile_{include_trophies}_{skip_avatars}"
-        cached_profile = get_cached_profile(cache_key, self._fetch_profile, include_trophies, skip_avatars)
-        return cached_profile
+        start_time = time.time()
+        logger.debug("Starting profile fetch...")
+
+        # Always fetch fresh data (no caching)
+        profile = self._fetch_profile(include_trophies, skip_avatars)
+
+        elapsed = time.time() - start_time
+        logger.debug(f"Profile fetch completed in {elapsed:.2f} seconds")
+        return profile
 
     def _fetch_profile(self, include_trophies: bool, skip_avatars: bool) -> Optional[UserProfile]:
         """Internal method to fetch profile data."""
@@ -178,19 +199,50 @@ class PSNClient:
             return None
 
     def _get_region_display(self, region_code: str) -> str:
-        """Convert region code to display name."""
+        """Convert region code to display name (optimized)."""
         if not region_code:
             return "Unknown"
+
+        # Simple mapping for common regions (fast)
+        common_regions = {
+            'US': 'United States',
+            'GB': 'United Kingdom',
+            'DE': 'Germany',
+            'FR': 'France',
+            'IT': 'Italy',
+            'ES': 'Spain',
+            'JP': 'Japan',
+            'KR': 'South Korea',
+            'AU': 'Australia',
+            'CA': 'Canada',
+            'BR': 'Brazil',
+            'MX': 'Mexico',
+            'RU': 'Russia',
+            'CN': 'China',
+            'IN': 'India',
+            'NL': 'Netherlands',
+            'SE': 'Sweden',
+            'NO': 'Norway',
+            'DK': 'Denmark',
+            'FI': 'Finland'
+        }
+
+        region_upper = region_code.upper()
+        if region_upper in common_regions:
+            return f"{common_regions[region_upper]} ({region_upper})"
+
+        # Fallback to pycountry for less common regions
         try:
             import pycountry
-            country = pycountry.countries.get(alpha_2=region_code.upper())
-            if not country:
-                return region_code
-            return f"{country.name} ({region_code.upper()})"
+            country = pycountry.countries.get(alpha_2=region_upper)
+            if country:
+                return f"{country.name} ({region_upper})"
         except Exception:
-            return region_code
+            pass
 
-    def get_friends_list(self, limit: int = 200) -> List[str]:
+        return region_upper
+
+    def get_friends_list(self, limit: int = 200, progress_callback=None) -> List[str]:
         """Get list of friends' online IDs."""
         if not self.is_authenticated():
             logger.error("Not authenticated. Please set NPSSO token first.")
@@ -198,10 +250,15 @@ class PSNClient:
 
         try:
             logger.info("Fetching friends list...")
+            if progress_callback:
+                progress_callback("Connecting to PSN...")
+
             me = self.psnawp.me()
             friends_generator = me.friends_list(limit=limit)
 
             friends = []
+            processed = 0
+
             for friend_user in friends_generator:
                 try:
                     if hasattr(friend_user, 'online_id'):
@@ -213,15 +270,26 @@ class PSNClient:
                         friend_name = str(friend_user)
 
                     friends.append(friend_name)
+                    processed += 1
+
+                    # Update progress every 10 friends
+                    if progress_callback and processed % 10 == 0:
+                        progress_callback(f"Loaded {processed} friends...")
+
                 except Exception as e:
                     logger.warning(f"Error processing friend: {e}")
                     continue
+
+            if progress_callback:
+                progress_callback(f"Completed! Found {len(friends)} friends")
 
             logger.info(f"Found {len(friends)} friends")
             return friends
 
         except Exception as e:
             logger.error(f"Failed to get friends list: {e}")
+            if progress_callback:
+                progress_callback("Error loading friends list")
             return []
 
     def get_user_friends_list(self, online_id: str, limit: int = 100) -> List[str]:

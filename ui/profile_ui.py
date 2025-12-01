@@ -86,7 +86,7 @@ Total: {profile.trophies.total_count}
         layout.addWidget(instructions)
 
         # Placeholder for future changelog/info
-        changelog_placeholder = QLabel("Future: Changelog and important updates will appear here.")
+        changelog_placeholder = QLabel("All data is fetched fresh from PSN (no caching).")
         changelog_placeholder.setStyleSheet("color: #666; font-style: italic; padding: 20px;")
         changelog_placeholder.setAlignment(Qt.AlignCenter)
         layout.addWidget(changelog_placeholder)

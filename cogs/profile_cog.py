@@ -23,7 +23,7 @@ class ProfileCog:
         self.client = client
 
     def get_my_profile(self, include_trophies: bool = True, skip_avatars: bool = False) -> Optional[UserProfile]:
-        """Get current user's profile."""
+        """Get current user's profile (always fresh data)."""
         try:
             profile = self.client.get_my_profile(include_trophies=include_trophies, skip_avatars=skip_avatars)
             return profile

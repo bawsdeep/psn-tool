@@ -23,13 +23,15 @@ class FriendsCog:
     def __init__(self, client: PSNClient):
         self.client = client
 
-    def get_friends_list(self, limit: int = 50) -> List[str]:
+    def get_friends_list(self, limit: int = 50, progress_callback=None) -> List[str]:
         """Get current user's friends list."""
         try:
-            friends = self.client.get_friends_list(limit=limit)
+            friends = self.client.get_friends_list(limit=limit, progress_callback=progress_callback)
             return friends if friends else []
         except Exception as e:
             logger.error(f"Error getting friends list: {e}")
+            if progress_callback:
+                progress_callback("Error loading friends list")
             return []
 
     def get_user_friends_list(self, user_id: str, limit: int = 100) -> List[str]:
