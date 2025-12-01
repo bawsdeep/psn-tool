@@ -802,10 +802,6 @@ class MainWindow(QMainWindow):
 
 def main():
     """Main application entry point."""
-    print("🚀 Starting PSN Tool...")
-    print(f"Platform: {sys.platform}")
-    print(f"Frozen: {getattr(sys, 'frozen', False)}")
-
     # Check if we have a display (for headless environments)
     if not os.environ.get('DISPLAY') and sys.platform.startswith('linux'):
         print("❌ No display available. Running in headless mode.")
@@ -835,21 +831,18 @@ def main():
         platform_name = QGuiApplication.platformName()
         if not platform_name:
             if sys.platform == 'win32':
-                print("⚠️  Qt platform plugin not detected on Windows.")
-                print("This might be normal - continuing anyway...")
+                # Qt platform might not be detected initially on Windows, continue anyway
+                pass
             else:
                 print("❌ Qt platform plugin not available.")
                 print("This might be due to missing Qt platform plugins.")
                 return 1
-        else:
-            print(f"✅ Qt platform: {platform_name}")
     except ImportError:
         print("❌ Failed to import Qt GUI components.")
         return 1
 
     try:
         app = QApplication(sys.argv)
-        print("✅ QApplication created successfully")
     except Exception as e:
         print(f"❌ Failed to create QApplication: {e}")
         print("This might be due to display/GUI system issues.")
