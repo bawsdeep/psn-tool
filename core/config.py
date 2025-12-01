@@ -40,21 +40,37 @@ def save_settings(settings: Dict[str, Any]) -> None:
 
 
 def get_npsso_token() -> Optional[str]:
-    """Get the stored NPSSO token."""
+    """Get the stored NPSSO token (decrypted)."""
     try:
         import utils.database
-        return utils.database.get_setting("npsso")
-    except Exception:
+        # Try to get encrypted token first (new format)
+        token = utils.database.get_setting("npsso", encrypted=True)
+        if token:
+            return token
+        
+        # Fallback: try unencrypted token (for migration)
+        token = utils.database.get_setting("npsso", encrypted=False)
+        if token:
+            # Migrate to encrypted format
+            logger.info("Migrating NPSSO token to encrypted storage")
+            set_npsso_token(token)  # This will encrypt it
+            return token
+        
+        return None
+    except Exception as e:
+        logger.error(f"Could not retrieve NPSSO token: {e}")
         return None
 
 
 def set_npsso_token(token: str) -> None:
-    """Set the NPSSO token."""
+    """Set the NPSSO token (encrypted)."""
     try:
         import utils.database
-        utils.database.set_setting("npsso", token)
+        utils.database.set_setting("npsso", token, encrypt=True)
+        logger.info("NPSSO token saved (encrypted)")
     except Exception as e:
         logger.error(f"Could not save NPSSO token: {e}")
+        raise
 
 
 # Legacy compatibility functions

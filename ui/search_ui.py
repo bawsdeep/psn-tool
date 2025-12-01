@@ -17,12 +17,16 @@ from models import UserProfile
 class SearchUI:
     """Handles search-related UI display logic."""
 
-    def __init__(self, content_area, content_title, search_callback=None, image_load_callback=None, image_error_callback=None):
+    def __init__(self, content_area, content_title, search_callback=None, image_load_callback=None, image_error_callback=None, view_friends_callback=None, view_games_callback=None):
         self.content_area = content_area
         self.content_title = content_title
         self.search_callback = search_callback
         self.image_load_callback = image_load_callback
         self.image_error_callback = image_error_callback
+        # Optional callback to view a user's friends list (if public)
+        self.view_friends_callback = view_friends_callback
+        # Optional callback to view a user's games list (if public)
+        self.view_games_callback = view_games_callback
         self.search_results_container = None
         self.search_input = None
         self.search_results_label = None
@@ -128,8 +132,14 @@ class SearchUI:
 
     def _add_profile_to_container(self, profile: UserProfile):
         """Add profile to search results container."""
+        # Ensure container exists (it may have been deleted when switching views)
+        if not self.search_results_container or not self.search_results_container.layout():
+            self.show_search_interface()
+
         result_widget = self._create_profile_widget(profile)
-        self.search_results_container.layout().addWidget(result_widget)
+        layout = self.search_results_container.layout()
+        if layout:
+            layout.addWidget(result_widget)
 
     def _display_profile_directly(self, profile: UserProfile):
         """Display profile directly in content area."""
@@ -212,6 +222,28 @@ Total: {profile.trophies.total_count}
             trophies_label.setWordWrap(True)
             info_layout.addWidget(trophies_label)
 
+        # Action buttons
+        buttons_layout = QHBoxLayout()
+        
+        # View Friends button (if callback provided)
+        if self.view_friends_callback:
+            friends_button = QPushButton("👥 View Friends (if public)")
+            friends_button.setToolTip("View this user's friends list if their privacy settings allow it.")
+            friends_button.setProperty("class", "action-button")
+            friends_button.clicked.connect(lambda: self.view_friends_callback(profile.online_id))
+            buttons_layout.addWidget(friends_button)
+
+        # View Games button (if callback provided)
+        if self.view_games_callback:
+            games_button = QPushButton("🎮 View Games (if public)")
+            games_button.setToolTip("View this user's games library if their privacy settings allow it.")
+            games_button.setProperty("class", "action-button")
+            games_button.clicked.connect(lambda: self.view_games_callback(profile.online_id))
+            buttons_layout.addWidget(games_button)
+
+        if buttons_layout.count() > 0:
+            info_layout.addLayout(buttons_layout)
+
         info_layout.addStretch()
         result_layout.addWidget(info_widget, stretch=1)
 
@@ -219,13 +251,18 @@ Total: {profile.trophies.total_count}
 
     def clear_search_results_container(self):
         """Clear search results container."""
-        if hasattr(self, 'search_results_container') and self.search_results_container:
-            layout = self.search_results_container.layout()
-            if layout:
-                while layout.count():
-                    child = layout.takeAt(0)
-                    if child.widget():
-                        child.widget().deleteLater()
+        # Guard against deleted widgets (common in Qt when switching views)
+        try:
+            if hasattr(self, 'search_results_container') and self.search_results_container:
+                layout = self.search_results_container.layout()
+                if layout:
+                    while layout.count():
+                        child = layout.takeAt(0)
+                        if child.widget():
+                            child.widget().deleteLater()
+        except RuntimeError:
+            # Underlying C++ object already deleted; ignore and let caller recreate UI
+            self.search_results_container = None
 
     def show_search_error(self, error_msg: str):
         """Show search error message."""

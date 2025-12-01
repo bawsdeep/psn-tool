@@ -297,7 +297,6 @@ class PSNClient:
 
         Note: PSN privacy settings usually make friends lists private.
         This will only work for users who have made their friends list public.
-        Additionally, PSNAWP library support for this feature may be limited.
         """
         if not self.is_authenticated():
             logger.error("Not authenticated. Please set NPSSO token first.")
@@ -307,25 +306,58 @@ class PSNClient:
             logger.error("Online ID cannot be empty")
             return []
 
-        # Check if this is the current user's own friends list
         try:
+            logger.info(f"Attempting to get friends list for user: {online_id}")
+
+            # Check if this is the current user's own friends list
             me = self.psnawp.me()
             if me.online_id.lower() == online_id.strip().lower():
                 logger.info("Getting your own friends list - using direct API")
                 return self.get_friends_list(limit=limit)
-        except:
-            pass
 
-        # For other users, PSNAWP may not support this or it may hang
-        logger.warning(f"PSNAWP library has known issues with accessing other users' friends lists")
-        logger.info(f"Feature may not be fully implemented in PSNAWP for user: {online_id}")
-        logger.info("Most PSN users have private friends lists anyway")
+            # Try to get the user's friends list
+            user = self.psnawp.user(online_id=online_id.strip())
 
-        # Return empty list with a clear message rather than hanging
-        return []
+            # Check if the user object has a friends_list method
+            if hasattr(user, 'friends_list'):
+                logger.info(f"Attempting to access friends list for {online_id}")
+                try:
+                    friends_generator = user.friends_list(limit=limit)
+
+                    friends = []
+                    for friend_user in friends_generator:
+                        try:
+                            if hasattr(friend_user, 'online_id'):
+                                friend_name = friend_user.online_id
+                            elif hasattr(friend_user, 'get_profile'):
+                                profile = friend_user.get_profile()
+                                friend_name = profile.get('onlineId', 'Unknown')
+                            else:
+                                friend_name = str(friend_user)
+
+                            friends.append(friend_name)
+                        except Exception as e:
+                            logger.warning(f"Error processing friend for {online_id}: {e}")
+                            continue
+
+                    logger.info(f"Successfully retrieved {len(friends)} friends for {online_id}")
+                    return friends
+
+                except Exception as e:
+                    logger.warning(f"Could not access friends list for {online_id}: {e}")
+                    logger.info("This user may have their friends list set to private")
+                    return []
+
+            else:
+                logger.warning(f"PSNAWP user object does not support friends_list for user: {online_id}")
+                return []
+
+        except Exception as e:
+            logger.error(f"Failed to get friends list for {online_id}: {e}")
+            return []
 
     def get_games_list(self, limit: int = 100) -> List[GameData]:
-        """Get list of user's games."""
+        """Get list of current user's games."""
         if not self.is_authenticated():
             logger.error("Not authenticated. Please set NPSSO token first.")
             return []
@@ -370,6 +402,84 @@ class PSNClient:
 
         except Exception as e:
             logger.error(f"Failed to get games list: {e}")
+            return []
+
+    def get_user_games_list(self, online_id: str, limit: int = 100) -> List[GameData]:
+        """Get another user's games list by their online ID.
+
+        Note: PSN privacy settings usually make games lists private.
+        This will only work for users who have made their games list public.
+        """
+        if not self.is_authenticated():
+            logger.error("Not authenticated. Please set NPSSO token first.")
+            return []
+
+        if not online_id or not online_id.strip():
+            logger.error("Online ID cannot be empty")
+            return []
+
+        try:
+            logger.info(f"Attempting to get games list for user: {online_id}")
+
+            # Check if this is the current user's own games list
+            me = self.psnawp.me()
+            if me.online_id.lower() == online_id.strip().lower():
+                logger.info("Getting your own games list - using direct API")
+                return self.get_games_list(limit=limit)
+
+            # Try to get the user's games list
+            user = self.psnawp.user(online_id=online_id.strip())
+
+            # Check if the user object has a title_stats method
+            if hasattr(user, 'title_stats'):
+                logger.info(f"Attempting to access games list for {online_id}")
+                try:
+                    games_iterator = user.title_stats(limit=limit)
+
+                    games = []
+                    for game in games_iterator:
+                        try:
+                            game_info = GameData(
+                                name=getattr(game, 'name', 'Unknown Game'),
+                                play_count=getattr(game, 'play_count', 0),
+                                category=getattr(game, 'category', 'Unknown'),
+                                platform=str(getattr(game, 'platform', 'Unknown')),
+                                title_id=getattr(game, 'title_id', ''),
+                                progress=getattr(game, 'progress', None),
+                                play_duration=str(getattr(game, 'play_duration', '')) if getattr(game, 'play_duration', None) else None,
+                                first_played=str(getattr(game, 'first_played_date', ''))[:10] if getattr(game, 'first_played_date', None) else None,
+                                last_played=str(getattr(game, 'last_played_date', ''))[:10] if getattr(game, 'last_played_date', None) else None
+                            )
+
+                            # Get image URL
+                            try:
+                                if hasattr(game, 'image_url') and game.image_url:
+                                    game_info.image_url = game.image_url
+                                elif hasattr(game, 'concept') and game.concept and hasattr(game.concept, 'image_url'):
+                                    game_info.image_url = game.concept.image_url
+                            except:
+                                pass
+
+                            games.append(game_info)
+
+                        except Exception as e:
+                            logger.warning(f"Error processing game for {online_id}: {e}")
+                            continue
+
+                    logger.info(f"Successfully retrieved {len(games)} games for {online_id}")
+                    return games
+
+                except Exception as e:
+                    logger.warning(f"Could not access games list for {online_id}: {e}")
+                    logger.info("This user may have their games list set to private")
+                    return []
+
+            else:
+                logger.warning(f"PSNAWP user object does not support title_stats for user: {online_id}")
+                return []
+
+        except Exception as e:
+            logger.error(f"Failed to get games list for {online_id}: {e}")
             return []
 
     def search_user(self, online_id: str) -> Optional[UserProfile]:

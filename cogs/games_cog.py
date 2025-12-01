@@ -32,6 +32,15 @@ class GamesCog:
             logger.error(f"Error getting games list: {e}")
             return []
 
+    def get_user_games_list(self, online_id: str, limit: int = 50) -> List[GameData]:
+        """Get another user's games list (if public)."""
+        try:
+            games = self.client.get_user_games_list(online_id, limit=limit)
+            return games if games else []
+        except Exception as e:
+            logger.error(f"Error getting user games list for {online_id}: {e}")
+            return []
+
     def export_games(self, games: List[GameData], filename: str) -> None:
         """Export games list to JSON file."""
         from dataclasses import asdict

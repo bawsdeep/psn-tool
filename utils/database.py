@@ -128,17 +128,51 @@ def initialize_database():
         logger.info("Database initialized successfully")
 
 
-def get_setting(key: str) -> Optional[str]:
-    """Get a setting value from the database."""
+def get_setting(key: str, encrypted: bool = False) -> Optional[str]:
+    """Get a setting value from the database.
+    
+    Args:
+        key: Setting key to retrieve
+        encrypted: If True, decrypt the value before returning
+    """
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
         result = cursor.fetchone()
-        return result[0] if result else None
+        if not result:
+            return None
+        
+        value = result[0]
+        
+        # Decrypt if needed
+        if encrypted:
+            try:
+                from utils.encryption import decrypt_token
+                value = decrypt_token(value)
+            except Exception as e:
+                logger.error(f"Failed to decrypt setting {key}: {e}")
+                return None
+        
+        return value
 
 
-def set_setting(key: str, value: str):
-    """Set a setting value in the database."""
+def set_setting(key: str, value: str, encrypt: bool = False):
+    """Set a setting value in the database.
+    
+    Args:
+        key: Setting key
+        value: Setting value to store
+        encrypt: If True, encrypt the value before storing
+    """
+    # Encrypt if needed
+    if encrypt:
+        try:
+            from utils.encryption import encrypt_token
+            value = encrypt_token(value)
+        except Exception as e:
+            logger.error(f"Failed to encrypt setting {key}: {e}")
+            raise
+    
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''

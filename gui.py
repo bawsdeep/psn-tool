@@ -3,6 +3,8 @@
 
 import sys
 import os
+import logging
+from functools import partial
 from typing import Optional
 
 # Add current directory to path for imports
@@ -22,6 +24,9 @@ from core.client import PSNClient
 from models import UserProfile, GameData
 import requests
 import tempfile
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 # Import cogs for business logic
 from cogs.friends_cog import FriendsCog
@@ -121,7 +126,7 @@ class ProfileLoaderThread(QThread):
 
 
 class FriendsLoaderThread(QThread):
-    """Thread for loading friends list."""
+    """Thread for loading current user's friends list."""
 
     finished = Signal(list)  # List[str]
     error = Signal(str)
@@ -133,12 +138,35 @@ class FriendsLoaderThread(QThread):
         self.limit = limit
 
     def run(self):
-        """Load friends list."""
+        """Load current user's friends list."""
         try:
             friends = self.friends_cog.get_friends_list(limit=self.limit, progress_callback=self.progress.emit)
             self.finished.emit(friends)
         except Exception as e:
             self.error.emit(f"Error loading friends: {str(e)}")
+
+
+class UserFriendsLoaderThread(QThread):
+    """Thread for loading another user's friends list."""
+
+    finished = Signal(list)  # List[str]
+    error = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, friends_cog, online_id: str, limit: int = 50):
+        super().__init__()
+        self.friends_cog = friends_cog
+        self.online_id = online_id
+        self.limit = limit
+
+    def run(self):
+        """Load another user's friends list."""
+        try:
+            self.progress.emit(f"Loading friends for {self.online_id} (if public)...")
+            friends = self.friends_cog.get_user_friends_list(self.online_id, limit=self.limit)
+            self.finished.emit(friends)
+        except Exception as e:
+            self.error.emit(f"Error loading friends for {self.online_id}: {str(e)}")
 
 
 class GamesLoaderThread(QThread):
@@ -161,6 +189,29 @@ class GamesLoaderThread(QThread):
             self.finished.emit(games)
         except Exception as e:
             self.error.emit(f"Error loading games: {str(e)}")
+
+
+class UserGamesLoaderThread(QThread):
+    """Thread for loading another user's games list."""
+
+    finished = Signal(list)  # List[GameData]
+    error = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, games_cog, online_id: str, limit: int = 50):
+        super().__init__()
+        self.games_cog = games_cog
+        self.online_id = online_id
+        self.limit = limit
+
+    def run(self):
+        """Load another user's games list."""
+        try:
+            self.progress.emit(f"Loading games for {self.online_id} (if public)...")
+            games = self.games_cog.get_user_games_list(self.online_id, limit=self.limit)
+            self.finished.emit(games)
+        except Exception as e:
+            self.error.emit(f"Error loading games for {self.online_id}: {str(e)}")
 
 
 class UserSearchThread(QThread):
@@ -274,20 +325,34 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def cleanup_threads(self):
-        """Clean up active threads."""
+        """Clean up active threads to prevent memory leaks."""
+        if not self.active_threads:
+            return
+
+        logger.debug(f"Cleaning up {len(self.active_threads)} active threads")
         for thread in self.active_threads[:]:  # Copy list to avoid modification during iteration
-            if thread.isRunning():
-                thread.quit()
-                thread.wait(1000)  # Wait up to 1 second
+            try:
                 if thread.isRunning():
-                    thread.terminate()  # Force termination if needed
-            self.active_threads.remove(thread)
+                    logger.debug(f"Stopping thread: {type(thread).__name__}")
+                    thread.quit()
+                    if not thread.wait(2000):  # Wait up to 2 seconds
+                        logger.warning(f"Thread {type(thread).__name__} did not stop gracefully, terminating")
+                        thread.terminate()
+                        thread.wait(500)  # Wait for termination
+            except Exception as e:
+                logger.error(f"Error cleaning up thread {type(thread).__name__}: {e}")
+            finally:
+                if thread in self.active_threads:
+                    self.active_threads.remove(thread)
+        
         self.active_threads.clear()
+        logger.debug("Thread cleanup completed")
 
     def track_thread(self, thread: QThread):
-        """Track a thread for cleanup."""
+        """Track a thread for cleanup to prevent memory leaks."""
         self.active_threads.append(thread)
-        thread.finished.connect(lambda: self.untrack_thread(thread))
+        # Use lambda with proper closure to avoid issues with signal arguments
+        thread.finished.connect(lambda checked=False, t=thread: self.untrack_thread(t))
 
     def untrack_thread(self, thread: QThread):
         """Remove thread from tracking."""
@@ -334,7 +399,9 @@ class MainWindow(QMainWindow):
             self.content_title,
             self.perform_search,
             self.load_search_picture,
-            self.on_search_picture_error
+            self.on_search_picture_error,
+            self.view_user_friends,
+            self.view_user_games,
         )
         self.profile_ui = ProfileUI(self.content_area, self.content_title)
         self.settings_ui = SettingsUI(self.content_area, self.content_title, self)
@@ -559,22 +626,46 @@ class MainWindow(QMainWindow):
     def on_profile_picture_error(self, error_msg: str):
         """Handle profile picture load error."""
         self.profile_picture_label.setText("No Image")
-        print(f"Profile picture error: {error_msg}")
+        logger.debug(f"Profile picture load failed: {error_msg}")
 
     def on_profile_error(self, error_msg: str):
-        """Handle profile load error."""
+        """Handle profile load error with user-friendly message."""
         self.progress_bar.setVisible(False)
-        QMessageBox.critical(self, "Profile Load Error", error_msg)
+        user_message = (
+            "Failed to load your profile from PSN.\n\n"
+            f"Error: {error_msg}\n\n"
+            "Possible causes:\n"
+            "• Network connection issue\n"
+            "• Invalid or expired NPSSO token\n"
+            "• PSN service temporarily unavailable\n\n"
+            "Try refreshing or checking your token in Settings."
+        )
+        QMessageBox.critical(self, "Profile Load Error", user_message)
+        logger.error(f"Profile load failed: {error_msg}")
 
-    def _show_error(self, error_msg: str):
-        """Helper method to display error messages in content area."""
+    def _show_error(self, error_msg: str, show_message_box: bool = False):
+        """Helper method to display error messages in content area.
+        
+        Args:
+            error_msg: Error message to display
+            show_message_box: If True, also show a QMessageBox dialog
+        """
         self.progress_bar.setVisible(False)
+        logger.error(f"Error displayed to user: {error_msg}")
+        
+        # Show in content area
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
         error_label = QLabel(error_msg)
-        error_label.setStyleSheet("color: #d9534f;")
+        error_label.setStyleSheet("color: #d9534f; padding: 20px; font-size: 14px;")
+        error_label.setWordWrap(True)
+        error_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(error_label)
         self.content_area.setWidget(content_widget)
+        
+        # Optionally show message box for critical errors
+        if show_message_box:
+            QMessageBox.critical(self, "Error", error_msg)
 
     def _show_progress(self, message: str, value: int = 0, maximum: int = 0):
         """Show progress bar with message."""
@@ -615,9 +706,100 @@ class MainWindow(QMainWindow):
         self.friends_ui.display_friends_list(friends)
 
     def on_friends_error(self, error_msg: str):
-        """Handle friends load error."""
+        """Handle friends load error with user-friendly message."""
         self._hide_progress()
-        self._show_error(f"Error loading friends: {error_msg}")
+        user_message = (
+            "Unable to load your friends list.\n\n"
+            f"Error: {error_msg}\n\n"
+            "Please try again or check your network connection."
+        )
+        self._show_error(user_message)
+        logger.error(f"Friends load failed: {error_msg}")
+
+    def view_user_friends(self, online_id: str):
+        """View another user's friends list (if public)."""
+        if not online_id or not online_id.strip():
+            return
+
+        online_id = online_id.strip()
+        self.friends_ui.show_user_friends_loading(online_id)
+        self._show_progress(f"Loading friends for {online_id} (if public)...")
+
+        loader = UserFriendsLoaderThread(self.friends_cog, online_id, limit=50)
+        loader.progress.connect(self._show_progress)
+        loader.finished.connect(lambda friends, name=online_id: self.on_user_friends_loaded(name, friends))
+        loader.error.connect(self.on_user_friends_error)
+        self.track_thread(loader)
+        loader.start()
+
+    def on_user_friends_loaded(self, online_id: str, friends):
+        """Handle another user's friends list load."""
+        self._hide_progress()
+        if friends:
+            self.friends_ui.display_user_friends_list(online_id, friends, back_callback=self.back_to_user_profile)
+        else:
+            # Show a friendly message when no friends are available / list is private
+            self.friends_ui.display_user_friends_list(online_id, [], back_callback=self.back_to_user_profile)
+            self._show_error(f"No public friends found for {online_id}. Their friends list may be private.")
+
+    def on_user_friends_error(self, error_msg: str):
+        """Handle errors when loading another user's friends."""
+        self._hide_progress()
+        user_message = (
+            "Unable to load this user's friends list.\n\n"
+            "This is usually because:\n"
+            "• Their friends list is set to private\n"
+            "• PSN privacy settings prevent access\n"
+            "• Network or API issues\n\n"
+            f"Technical details: {error_msg}"
+        )
+        self._show_error(user_message)
+        logger.error(f"User friends load failed: {error_msg}")
+
+    def view_user_games(self, online_id: str):
+        """View another user's games list (if public)."""
+        if not online_id or not online_id.strip():
+            return
+
+        online_id = online_id.strip()
+        self.games_ui.show_user_games_loading(online_id)
+        self._show_progress(f"Loading games for {online_id} (if public)...")
+
+        loader = UserGamesLoaderThread(self.games_cog, online_id, limit=50)
+        loader.progress.connect(self._show_progress)
+        loader.finished.connect(lambda games, name=online_id: self.on_user_games_loaded(name, games))
+        loader.error.connect(self.on_user_games_error)
+        self.track_thread(loader)
+        loader.start()
+
+    def on_user_games_loaded(self, online_id: str, games):
+        """Handle another user's games list load."""
+        self._hide_progress()
+        if games:
+            self.games_ui.display_user_games_list(online_id, games, back_callback=self.back_to_user_profile)
+        else:
+            # Show a friendly message when no games are available / list is private
+            self.games_ui.display_user_games_list(online_id, [], back_callback=self.back_to_user_profile)
+            self._show_error(f"No public games found for {online_id}. Their games library may be private.")
+
+    def on_user_games_error(self, error_msg: str):
+        """Handle errors when loading another user's games."""
+        self._hide_progress()
+        user_message = (
+            "Unable to load this user's games library.\n\n"
+            "This is usually because:\n"
+            "• Their games list is set to private\n"
+            "• PSN privacy settings prevent access\n"
+            "• Network or API issues\n\n"
+            f"Technical details: {error_msg}"
+        )
+        self._show_error(user_message)
+        logger.error(f"User games load failed: {error_msg}")
+
+    def back_to_user_profile(self, online_id: str):
+        """Go back to a user's profile from their friends/games view."""
+        # Re-search for the user to show their profile again
+        self.perform_search(online_id)
 
     def search_friend(self, friend_name):
         """Search for a friend's profile."""
@@ -667,9 +849,15 @@ class MainWindow(QMainWindow):
         self.games_ui.display_games_list(games)
 
     def on_games_error(self, error_msg: str):
-        """Handle games load error."""
+        """Handle games load error with user-friendly message."""
         self._hide_progress()
-        self._show_error(f"Error loading games: {error_msg}")
+        user_message = (
+            "Unable to load your games library.\n\n"
+            f"Error: {error_msg}\n\n"
+            "Please try again or check your network connection."
+        )
+        self._show_error(user_message)
+        logger.error(f"Games load failed: {error_msg}")
 
     def show_search(self):
         """Show user search interface."""
@@ -697,9 +885,15 @@ class MainWindow(QMainWindow):
         self.search_ui.display_search_results(profile)
 
     def on_user_search_error(self, error_msg: str):
-        """Handle user search error."""
+        """Handle user search error with user-friendly message."""
         self._hide_progress()
-        self.search_ui.show_search_error(f"Search error: {error_msg}")
+        user_message = (
+            "Unable to search for user.\n\n"
+            f"Error: {error_msg}\n\n"
+            "Please check the username and try again."
+        )
+        self.search_ui.show_search_error(user_message)
+        logger.error(f"User search failed: {error_msg}")
 
     def on_search_picture_loaded(self, label: QLabel, pixmap: QPixmap):
         """Handle search result picture load."""
@@ -711,7 +905,7 @@ class MainWindow(QMainWindow):
     def on_search_picture_error(self, label: QLabel, error_msg: str):
         """Handle search result picture load error."""
         label.setText("No Image")
-        print(f"Search picture error: {error_msg}")
+        logger.debug(f"Search picture load failed: {error_msg}")
 
     def copy_profile_base64(self, base64_data: str):
         """Copy profile base64 data to clipboard."""

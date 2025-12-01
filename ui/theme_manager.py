@@ -114,7 +114,9 @@ class ThemeManager:
                 app.setStyle("Fusion")
                 ThemeManager._apply_gruvbox_theme(app)
             except Exception as e:
-                print(f"⚠️  Could not apply default theme: {e}")
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Could not apply default theme, using fallback: {e}")
                 ThemeManager._apply_custom_palette(app)
 
     @staticmethod
