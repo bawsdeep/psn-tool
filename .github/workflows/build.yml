@@ -6,6 +6,7 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+  workflow_call:  # Allow this workflow to be called from other workflows
 
 jobs:
   build-linux:
@@ -100,12 +101,20 @@ jobs:
           file dist/psntool
         fi
 
+    - name: Create checksums (Linux)
+      run: |
+        if [ -f "dist/psntool" ]; then
+          cd dist
+          sha256sum psntool > psntool.sha256
+        fi
+
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: psntool-linux
         path: |
           dist/psntool
+          dist/psntool.sha256
         if-no-files-found: warn
 
   build-windows:
@@ -137,10 +146,23 @@ jobs:
           Get-Item "dist/psntool.exe" | Select-Object Name, Length, LastWriteTime
         }
 
+    - name: Create checksums (Windows)
+      run: |
+        if (Test-Path "dist/psntool.exe") {
+          Push-Location dist
+          try {
+            $hash = Get-FileHash -Path "psntool.exe" -Algorithm SHA256
+            $hash.Hash.ToLower() | Out-File -FilePath "psntool.exe.sha256" -Encoding ASCII
+          } finally {
+            Pop-Location
+          }
+        }
+
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: psntool-windows
         path: |
           dist/psntool.exe
+          dist/psntool.exe.sha256
         if-no-files-found: warn

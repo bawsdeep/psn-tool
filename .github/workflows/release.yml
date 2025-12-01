@@ -94,20 +94,14 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        # Build in headless environment - runtime hook will handle platform detection
         export QT_DEBUG_PLUGINS=0
         pyinstaller psntool.spec
 
     - name: Prepare release assets (Linux)
       run: |
-        # Make binary executable
         chmod +x dist/psntool
-
-        # Create checksums
         cd dist
         sha256sum psntool > psntool.sha256
-
-        # Show binary info
         ls -lh psntool
         file psntool
 
@@ -140,12 +134,10 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        # Build in headless environment - runtime hook will handle platform detection
         pyinstaller psntool.spec
 
     - name: Prepare release assets (Windows)
       run: |
-        # Create checksums
         Push-Location dist
         try {
           $hash = Get-FileHash -Path "psntool.exe" -Algorithm SHA256
@@ -153,8 +145,6 @@ jobs:
         } finally {
           Pop-Location
         }
-
-        # Show binary info
         Get-Item "dist/psntool.exe" | Select-Object Name, Length, LastWriteTime
 
     - name: Upload Windows build artifacts
