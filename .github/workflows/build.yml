@@ -38,7 +38,7 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --clean psntool.spec
+        pyinstaller psntool.spec
 
     - name: Create distribution directory and rename binary
       run: |
