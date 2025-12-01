@@ -1,40 +1,20 @@
 """
-Custom PyInstaller hook for PySide6 to exclude X11-dependent plugins in headless environments.
+Custom PyInstaller hook for PySide6 to properly handle Qt platform plugins.
+This hook ensures Qt platform detection works correctly at runtime.
 """
 
 import os
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
-# Force offscreen platform for Qt before any Qt imports
-os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-os.environ['QT_DEBUG_PLUGINS'] = '0'
+# Don't force platform during build - let runtime hook handle it
+# This allows the executable to work on both headless and desktop systems
 
-# Collect PySide6 modules but exclude problematic X11 plugins
+# Collect all PySide6 modules
 hiddenimports = collect_submodules('PySide6')
 
-# Remove X11-dependent modules that cause issues in headless environments
-excluded_modules = [
-    'PySide6.QtPlugins.platforms.xcb',
-    'PySide6.QtPlugins.platforms.libqxcb',
-    'PySide6.QtPlugins.xcbglintegrations',
-    'xcb',
-    'xcbqpa',
-]
-
-# Filter out excluded modules
-hiddenimports = [mod for mod in hiddenimports if not any(excl in mod.lower() for excl in excluded_modules)]
-
-# Collect data files but exclude X11 platform plugins
+# Collect all data files (including platform plugins)
+# The runtime hook will handle platform selection
 datas = collect_data_files('PySide6')
-
-# Filter out X11 platform plugins from datas
-filtered_datas = []
-for src, dst in datas:
-    if 'platforms/libqxcb' in src or 'xcbglintegrations' in src:
-        continue  # Skip X11 plugins
-    filtered_datas.append((src, dst))
-
-datas = filtered_datas
 
 # No binaries needed for this hook
 binaries = []

@@ -86,25 +86,10 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Set up Qt environment
-      run: |
-        # Force Qt to use offscreen platform to avoid X11 dependencies
-        export QT_QPA_PLATFORM=offscreen
-        export QT_DEBUG_PLUGINS=0
-        export QT_QPA_PLATFORM_PLUGIN_PATH=""
-        export DISPLAY=""
-        export WAYLAND_DISPLAY=""
-        # Test Qt import to initialize it with offscreen platform
-        python -c "import os; os.environ['QT_QPA_PLATFORM'] = 'offscreen'; import PySide6.QtCore; print('Qt initialized successfully')"
-
     - name: Build with PyInstaller
       run: |
-        # Force Qt to use offscreen platform to avoid X11 dependencies
-        export QT_QPA_PLATFORM=offscreen
+        # Build in headless environment - runtime hook will handle platform detection
         export QT_DEBUG_PLUGINS=0
-        export QT_QPA_PLATFORM_PLUGIN_PATH=""
-        export DISPLAY=""
-        export WAYLAND_DISPLAY=""
         pyinstaller psntool.spec
 
     - name: Make binary executable and show info
