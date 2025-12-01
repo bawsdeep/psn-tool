@@ -8,24 +8,32 @@ import os
 import sys
 
 # Only apply special Qt platform handling when running from PyInstaller bundle
-# Check if we're running from a PyInstaller bundle
 if getattr(sys, 'frozen', False):
-    # Check if we're in a headless environment (no display available)
+    import platform
+
+    # Check environment
     has_display = bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
     is_ci = bool(os.environ.get('GITHUB_ACTIONS') or os.environ.get('CI'))
+    is_windows = platform.system() == 'Windows'
 
-    # Only force offscreen platform in truly headless environments
-    if not has_display or is_ci:
+    # Platform-specific handling
+    if is_windows:
+        # On Windows, let Qt use default Windows platform
+        # Don't set QT_QPA_PLATFORM to avoid conflicts with Windows Qt
+        pass
+    elif not has_display or is_ci:
+        # Only force offscreen on Linux/macOS when headless
         os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-        # In headless environments, disable platform plugins that require X11
         os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = ''
     else:
-        # On desktop systems, let Qt auto-detect the best platform
-        # Don't override QT_QPA_PLATFORM if it's already set
+        # On Linux/macOS desktop, let Qt auto-detect
         pass
 
-    # Ensure XDG_RUNTIME_DIR is set for Qt (needed even on desktop)
-    if not os.environ.get('XDG_RUNTIME_DIR'):
+    # Set Qt debug level to reduce noise
+    os.environ['QT_DEBUG_PLUGINS'] = '0'
+
+    # Ensure proper temp directory for Qt (cross-platform)
+    if not os.environ.get('XDG_RUNTIME_DIR') and not is_windows:
         # Try common locations first
         for candidate in ['/run/user/1000', '/tmp/runtime-user']:
             if os.path.exists(candidate):
@@ -37,9 +45,6 @@ if getattr(sys, 'frozen', False):
             runtime_dir = tempfile.mkdtemp(prefix='qt-runtime-')
             os.environ['XDG_RUNTIME_DIR'] = runtime_dir
 
-    # Set Qt debug level to reduce noise
-    os.environ['QT_DEBUG_PLUGINS'] = '0'
 else:
     # When running from source, let Qt handle platform detection normally
-    # Just set debug level to reduce noise
     os.environ['QT_DEBUG_PLUGINS'] = '0'

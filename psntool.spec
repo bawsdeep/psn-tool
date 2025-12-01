@@ -25,20 +25,18 @@ a = Analysis(
         # Additional Qt modules
         'PySide6.QtPrintSupport',
         'PySide6.QtOpenGL',
+        # Windows-specific Qt modules
+        'PySide6.QtWinExtras',  # Windows-specific functionality
         # Other potential hidden imports
         'shiboken6',
         'shiboken6.Shiboken',
         # Platform-specific imports
         'PySide6.QtWaylandClient',  # For Wayland support
+        # Windows platform plugins
+        'PySide6.QtPlugins.platforms.qwindows',
     ],
     hookspath=['.'],  # Include current directory for custom hooks
-    hooksconfig={
-        # Configure PySide6 hook to exclude problematic plugins
-        'pyside6': {
-            'exclude_plugins': ['xcb', 'xcbgl', 'xcbqpa'],
-            'force_platform': 'offscreen'
-        }
-    },
+    hooksconfig={},  # Let runtime hook handle platform detection
     runtime_hooks=[
         'qt_platform_hook.py',  # Custom runtime hook for Qt platform setup
     ],
@@ -78,7 +76,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,  # UPX disabled for Linux builds
+    upx=False,  # UPX disabled for compatibility
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,  # Hide console window for GUI app
@@ -88,4 +86,6 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=None,  # Add icon if available: 'icon.ico'
+    # Windows-specific: ensure proper GUI app behavior
+    version=None,
 )
