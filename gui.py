@@ -132,7 +132,7 @@ class FriendsLoaderThread(QThread):
     error = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, friends_cog, limit: int = 50):
+    def __init__(self, friends_cog, limit: int = 200):
         super().__init__()
         self.friends_cog = friends_cog
         self.limit = limit
@@ -693,7 +693,7 @@ class MainWindow(QMainWindow):
         self._show_progress("Loading friends list from PSN...")
 
         # Load friends in background thread
-        loader = FriendsLoaderThread(self.friends_cog, limit=50)
+        loader = FriendsLoaderThread(self.friends_cog, limit=200)  # Increased limit to show all friends
         loader.progress.connect(self._show_progress)
         loader.finished.connect(self.on_friends_loaded)
         loader.error.connect(self.on_friends_error)
