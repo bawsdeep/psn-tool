@@ -51,8 +51,12 @@ class ThemeManager:
         """Apply theme based on user preference or best available defaults."""
         from utils.database import get_setting
 
-        # Check for stored theme preference
-        theme = get_setting("theme") or "default"
+        # Check for stored theme preference (with error handling)
+        try:
+            theme = get_setting("theme") or "default"
+        except Exception:
+            # Database not initialized yet or other error - use default theme
+            theme = "default"
 
         if theme == "gruvbox":
             # Apply Gruvbox theme - try Fusion base first

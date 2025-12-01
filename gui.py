@@ -843,6 +843,10 @@ def main():
         print("This might be due to display/GUI system issues.")
         return 1
 
+    # Initialize database before applying theme
+    from core.config import initialize_config
+    initialize_config()
+
     # Set application properties
     app.setApplicationName("PSN Tool")
     app.setApplicationVersion("2.0.0")
