@@ -34,6 +34,10 @@ a = Analysis(
         'PySide6.QtWaylandClient',  # For Wayland support
         # Windows platform plugins
         'PySide6.QtPlugins.platforms.qwindows',
+        # Additional Windows imports
+        'win32api',
+        'win32con',
+        'win32gui',
     ],
     hookspath=['.'],  # Include current directory for custom hooks
     hooksconfig={},  # Let runtime hook handle platform detection
@@ -79,7 +83,7 @@ exe = EXE(
     upx=False,  # UPX disabled for compatibility
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # Hide console window for GUI app
+    console=True,  # Show console for debugging (change to False later)
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
