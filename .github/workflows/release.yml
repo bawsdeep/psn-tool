@@ -169,6 +169,8 @@ jobs:
   create-release:
     needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required to create releases
 
     steps:
     - name: Download Linux artifacts
