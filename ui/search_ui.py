@@ -4,7 +4,7 @@ import sys
 import os
 from typing import Optional
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QLineEdit, QHBoxLayout, QPushButton, QFrame
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 # Ensure proper imports
 current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,10 +30,54 @@ class SearchUI:
         self.search_results_container = None
         self.search_input = None
         self.search_results_label = None
+        self.search_section = None  # Reference to search section for hiding/showing
+        self._widget_valid = True  # Track if widgets are still valid
 
     def show_search_interface(self):
         """Show user search interface."""
+        # Disconnect old search input signals if it exists
+        if self.search_input:
+            try:
+                self.search_input.returnPressed.disconnect()
+            except (TypeError, RuntimeError):
+                # Signal already disconnected or widget deleted, ignore
+                pass
+        
+        self._widget_valid = True  # Mark widgets as valid
         self.content_title.setText("Search Users")
+        
+        # Show search section if it exists and was hidden
+        if self.search_section:
+            try:
+                _ = self.search_section.objectName()  # Verify it's still valid
+                self.search_section.setVisible(True)
+                # Clear any existing results
+                self.clear_search_results_container()
+                if self.search_results_label:
+                    try:
+                        self.search_results_label.setText("")
+                    except RuntimeError:
+                        pass
+                # Ensure signal connection is still active
+                if self.search_input:
+                    try:
+                        _ = self.search_input.objectName()  # Verify it's still valid
+                        # Reconnect signal in case it was disconnected
+                        try:
+                            self.search_input.returnPressed.disconnect()
+                        except (TypeError, RuntimeError):
+                            # Signal not connected, that's fine
+                            pass
+                        self.search_input.returnPressed.connect(self._on_search_triggered)
+                        # Set focus to search input after a short delay
+                        QTimer.singleShot(50, lambda: self._focus_search_input())
+                    except RuntimeError:
+                        # Widget was deleted, will recreate below
+                        pass
+                return  # Don't recreate if section is still valid
+            except RuntimeError:
+                # Widget was deleted, will be recreated below
+                self.search_section = None
 
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
@@ -63,6 +107,8 @@ class SearchUI:
         # Connect Enter key to search - use method reference instead of lambda
         self.search_input.returnPressed.connect(self._on_search_triggered)
         input_layout.addWidget(self.search_input, stretch=1)
+        # Set focus to search input for immediate typing
+        self.search_input.setFocus()
 
         search_button = QPushButton("🔍 Search")
         search_button.setProperty("class", "search-button")
@@ -82,33 +128,98 @@ class SearchUI:
         layout.addWidget(self.search_results_container)
         layout.addStretch()
         self.content_area.setWidget(content_widget)
+        
+        # Store reference to search section for hiding/showing
+        self.search_section = search_section
 
+    def _show_search_again(self):
+        """Show search interface again after results are displayed."""
+        self.show_search_interface()
+        # Set focus to search input after a short delay to ensure widget is visible
+        # Use QTimer to schedule focus after the widget is shown
+        if self.search_input:
+            try:
+                _ = self.search_input.objectName()  # Verify it's still valid
+                # Use single-shot timer to set focus after widget is shown
+                QTimer.singleShot(50, lambda: self._focus_search_input())
+            except RuntimeError:
+                # Widget was deleted, ignore
+                pass
+    
+    def _focus_search_input(self):
+        """Set focus to search input and select all text."""
+        if self.search_input:
+            try:
+                _ = self.search_input.objectName()  # Verify it's still valid
+                # Ensure widget is visible and enabled
+                if self.search_input.isVisible() and self.search_input.isEnabled():
+                    self.search_input.setFocus()
+                    self.search_input.selectAll()
+            except RuntimeError:
+                # Widget was deleted, ignore
+                pass
+    
     def _on_search_triggered(self):
         """Handle search trigger from button or Enter key."""
         if self.search_input:
-            self.perform_search(self.search_input.text())
+            try:
+                # Check if widget is still valid before accessing it
+                _ = self.search_input.objectName()
+                username = self.search_input.text()
+                self.perform_search(username)
+            except RuntimeError:
+                # Widget was deleted, recreate interface
+                self.show_search_interface()
+                # Try again if widget was recreated
+                if self.search_input:
+                    try:
+                        username = self.search_input.text()
+                        self.perform_search(username)
+                    except RuntimeError:
+                        # Still invalid, just return
+                        pass
 
     def perform_search(self, username: str):
         """Perform user search."""
         # Ensure search interface is shown and widgets exist
         if not self.search_results_label or not self.search_input:
             self.show_search_interface()
+        else:
+            # Verify widgets are still valid
+            try:
+                _ = self.search_input.objectName()
+                _ = self.search_results_label.objectName()
+            except RuntimeError:
+                # Widgets were deleted, recreate interface
+                self.show_search_interface()
         
         if not username.strip():
             try:
-                self.search_results_label.setText("Please enter a username.")
+                if self.search_results_label:
+                    _ = self.search_results_label.objectName()  # Verify it's still valid
+                    self.search_results_label.setText("Please enter a username.")
             except RuntimeError:
                 # Widget was deleted, recreate interface
                 self.show_search_interface()
-                self.search_results_label.setText("Please enter a username.")
+                if self.search_results_label:
+                    try:
+                        self.search_results_label.setText("Please enter a username.")
+                    except RuntimeError:
+                        pass
             return
 
         try:
-            self.search_results_label.setText("Searching...")
+            if self.search_results_label:
+                _ = self.search_results_label.objectName()  # Verify it's still valid
+                self.search_results_label.setText("Searching...")
         except RuntimeError:
             # Widget was deleted, recreate interface
             self.show_search_interface()
-            self.search_results_label.setText("Searching...")
+            if self.search_results_label:
+                try:
+                    self.search_results_label.setText("Searching...")
+                except RuntimeError:
+                    pass
 
         if self.search_callback:
             self.search_callback(username.strip())
@@ -116,16 +227,49 @@ class SearchUI:
     def display_search_results(self, profile: Optional[UserProfile], in_friend_context: bool = False):
         """Display search results with profile picture."""
         if not profile:
-            if self.search_results_container:
-                self.clear_search_results_container()
-                self.search_results_label.setText("User not found or profile is private.")
+            try:
+                if self.search_results_container:
+                    self.clear_search_results_container()
+                    if self.search_results_label:
+                        try:
+                            self.search_results_label.setText("User not found or profile is private.")
+                        except RuntimeError:
+                            # Widget was deleted, recreate interface
+                            self.show_search_interface()
+                            if self.search_results_label:
+                                self.search_results_label.setText("User not found or profile is private.")
+            except RuntimeError:
+                # Widgets were deleted, recreate interface
+                self.show_search_interface()
+                if self.search_results_label:
+                    self.search_results_label.setText("User not found or profile is private.")
             return
 
         # Check if we're in search UI context or friend search context
-        if not in_friend_context and hasattr(self, 'search_results_container') and self.search_results_container:
-            # We're in search UI context - clear existing content and add to container
-            self.clear_search_results_container()
-            self._add_profile_to_container(profile)
+        if not in_friend_context:
+            try:
+                # Check if search_results_container still exists
+                if hasattr(self, 'search_results_container') and self.search_results_container:
+                    # Verify the widget is still valid
+                    try:
+                        _ = self.search_results_container.objectName()
+                    except RuntimeError:
+                        # Widget was deleted, recreate interface
+                        self.show_search_interface()
+                    
+                    # We're in search UI context - clear existing content and add to container
+                    self.clear_search_results_container()
+                    self._add_profile_to_container(profile)
+                else:
+                    # Container doesn't exist, recreate interface
+                    self.show_search_interface()
+                    self.clear_search_results_container()
+                    self._add_profile_to_container(profile)
+            except RuntimeError:
+                # Widgets were deleted, recreate interface
+                self.show_search_interface()
+                self.clear_search_results_container()
+                self._add_profile_to_container(profile)
         else:
             # We're in friend search context - display directly in content area
             self._display_profile_directly(profile)
@@ -133,25 +277,99 @@ class SearchUI:
     def _add_profile_to_container(self, profile: UserProfile):
         """Add profile to search results container."""
         # Ensure container exists (it may have been deleted when switching views)
-        if not self.search_results_container or not self.search_results_container.layout():
-            self.show_search_interface()
+        try:
+            if not self.search_results_container:
+                self.show_search_interface()
+            else:
+                # Verify the widget is still valid
+                try:
+                    _ = self.search_results_container.objectName()
+                except RuntimeError:
+                    # Widget was deleted, recreate interface
+                    self.show_search_interface()
+            
+            if not self.search_results_container or not self.search_results_container.layout():
+                self.show_search_interface()
 
-        result_widget = self._create_profile_widget(profile)
-        layout = self.search_results_container.layout()
-        if layout:
-            layout.addWidget(result_widget)
+            # Hide the search section after displaying results
+            if self.search_section:
+                try:
+                    _ = self.search_section.objectName()  # Verify it's still valid
+                    self.search_section.setVisible(False)
+                except RuntimeError:
+                    # Widget was deleted, ignore
+                    pass
+
+            result_widget = self._create_profile_widget(profile)
+            
+            # Add a "Search Again" button at the top of results
+            from PySide6.QtWidgets import QHBoxLayout, QPushButton
+            button_layout = QHBoxLayout()
+            search_again_button = QPushButton("🔍 Search Again")
+            search_again_button.setProperty("class", "search-button")
+            search_again_button.clicked.connect(self._show_search_again)
+            button_layout.addWidget(search_again_button)
+            button_layout.addStretch()
+            
+            layout = self.search_results_container.layout()
+            if layout:
+                # Insert button at the beginning
+                layout.insertLayout(0, button_layout)
+                layout.addWidget(result_widget)
+        except RuntimeError:
+            # Widgets were deleted, recreate interface and try again
+            self.show_search_interface()
+            if self.search_results_container and self.search_results_container.layout():
+                result_widget = self._create_profile_widget(profile)
+                self.search_results_container.layout().addWidget(result_widget)
 
     def _display_profile_directly(self, profile: UserProfile):
         """Display profile directly in content area."""
-        content_widget = QWidget()
-        layout = QVBoxLayout(content_widget)
+        try:
+            # Mark old widgets as invalid before replacing
+            self._widget_valid = False
+            
+            # Disconnect signals from search input before it gets deleted
+            if self.search_input:
+                try:
+                    self.search_input.returnPressed.disconnect()
+                except (TypeError, RuntimeError):
+                    # Signal already disconnected or widget deleted, ignore
+                    pass
+            
+            # Clear references to widgets that will be deleted
+            # This prevents accessing deleted widgets later
+            self.search_input = None
+            self.search_results_container = None
+            self.search_results_label = None
+            
+            # Get old widget before replacing it
+            old_widget = self.content_area.widget()
+            
+            content_widget = QWidget()
+            layout = QVBoxLayout(content_widget)
 
-        result_widget = self._create_profile_widget(profile)
-        layout.addWidget(result_widget)
-        layout.addStretch()
+            result_widget = self._create_profile_widget(profile)
+            layout.addWidget(result_widget)
+            layout.addStretch()
 
-        # Set content
-        self.content_area.setWidget(content_widget)
+            # Set content - this will delete the old widget
+            self.content_area.setWidget(content_widget)
+            
+            # Mark new widgets as valid
+            self._widget_valid = True
+            
+            # Delete old widget explicitly to ensure cleanup
+            if old_widget:
+                old_widget.deleteLater()
+        except RuntimeError:
+            # Widget was deleted, ignore and continue
+            self._widget_valid = True  # Reset flag
+            # Clear references
+            self.search_input = None
+            self.search_results_container = None
+            self.search_results_label = None
+            pass
 
     def _create_profile_widget(self, profile: UserProfile):
         """Create a profile display widget."""

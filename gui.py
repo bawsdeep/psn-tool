@@ -6,6 +6,7 @@ import os
 import logging
 from functools import partial
 from typing import Optional
+from weakref import ref
 
 # Add current directory to path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -298,6 +299,8 @@ class MainWindow(QMainWindow):
         self.client = PSNClient()
         self.current_profile: Optional[UserProfile] = None
         self.active_threads = []  # Track active threads for cleanup
+        self.active_image_loaders = []  # Track active image loaders to cancel on new search
+        self.current_search_thread = None  # Track current search thread to cancel on new search
 
         # Initialize cogs for business logic
         self.friends_cog = FriendsCog(self.client)
@@ -324,8 +327,67 @@ class MainWindow(QMainWindow):
         self.cleanup_threads()
         event.accept()
 
+    def _cancel_current_search(self):
+        """Cancel current search thread to prevent crashes from deleted widgets."""
+        if self.current_search_thread is None:
+            return
+        
+        try:
+            thread = self.current_search_thread
+            if thread.isRunning():
+                logger.debug("Cancelling current search thread")
+                # Disconnect signals to prevent callbacks from firing
+                try:
+                    thread.progress.disconnect()
+                    thread.finished.disconnect()
+                    thread.error.disconnect()
+                except (TypeError, RuntimeError):
+                    # Signals already disconnected or thread deleted, ignore
+                    pass
+                
+                thread.quit()
+                if not thread.wait(1000):  # Wait up to 1 second
+                    thread.terminate()
+                    thread.wait(200)
+        except Exception as e:
+            logger.debug(f"Error cancelling search thread: {e}")
+        finally:
+            self.current_search_thread = None
+
+    def _cancel_pending_image_loaders(self):
+        """Cancel pending image loaders to prevent crashes from deleted widgets."""
+        if not self.active_image_loaders:
+            return
+        
+        logger.debug(f"Cancelling {len(self.active_image_loaders)} pending image loaders")
+        loaders_to_cancel = self.active_image_loaders[:]  # Copy list
+        self.active_image_loaders.clear()  # Clear immediately to prevent re-entry
+        
+        for loader in loaders_to_cancel:
+            try:
+                if loader.isRunning():
+                    # Disconnect signals to prevent callbacks from firing
+                    try:
+                        loader.finished.disconnect()
+                        loader.error.disconnect()
+                    except (TypeError, RuntimeError):
+                        # Signals already disconnected or thread deleted, ignore
+                        pass
+                    
+                    loader.quit()
+                    if not loader.wait(500):  # Wait up to 500ms
+                        loader.terminate()
+                        loader.wait(200)
+            except Exception as e:
+                logger.debug(f"Error cancelling image loader: {e}")
+
     def cleanup_threads(self):
         """Clean up active threads to prevent memory leaks."""
+        # Cancel current search first
+        self._cancel_current_search()
+        # Cancel image loaders
+        self._cancel_pending_image_loaders()
+        
         if not self.active_threads:
             return
 
@@ -351,11 +413,12 @@ class MainWindow(QMainWindow):
     def track_thread(self, thread: QThread):
         """Track a thread for cleanup to prevent memory leaks."""
         self.active_threads.append(thread)
-        # Use lambda with proper closure to avoid issues with signal arguments
-        thread.finished.connect(lambda checked=False, t=thread: self.untrack_thread(t))
+        # Use functools.partial for safer signal connection
+        # Note: QThread.finished doesn't emit arguments, but we use *args for safety
+        thread.finished.connect(partial(self.untrack_thread, thread))
 
-    def untrack_thread(self, thread: QThread):
-        """Remove thread from tracking."""
+    def untrack_thread(self, thread: QThread, *args):
+        """Remove thread from tracking. Accepts *args to handle any signal arguments."""
         if thread in self.active_threads:
             self.active_threads.remove(thread)
 
@@ -610,10 +673,15 @@ class MainWindow(QMainWindow):
 
     def load_search_picture(self, url: str, label: QLabel):
         """Load profile picture for search results."""
+        # Store weak reference to label in loader for safe access
+        # Weak reference will return None if the widget is deleted
         loader = ImageLoader(url, (80, 80))
-        loader.finished.connect(lambda pixmap: self.on_search_picture_loaded(label, pixmap))
-        loader.error.connect(lambda error: self.on_search_picture_error(label, error))
+        loader.label_ref = ref(label)  # Store weak reference to label
+        # Use functools.partial for safer signal connection
+        loader.finished.connect(partial(self.on_search_picture_loaded_safe, loader))
+        loader.error.connect(partial(self.on_search_picture_error_safe, loader))
         self.track_thread(loader)
+        self.active_image_loaders.append(loader)
         loader.start()
 
     def on_profile_picture_loaded(self, pixmap: QPixmap):
@@ -803,20 +871,40 @@ class MainWindow(QMainWindow):
 
     def search_friend(self, friend_name):
         """Search for a friend's profile."""
+        # Cancel any pending search thread to prevent crashes from deleted widgets
+        self._cancel_current_search()
+        # Cancel any pending image loaders
+        self._cancel_pending_image_loaders()
+        
         self.friends_ui.display_friend_search(friend_name)
         self._show_progress(f"Searching for user '{friend_name}'...")
 
         # Search in background thread
         searcher = UserSearchThread(self.search_cog, friend_name.strip())
         searcher.progress.connect(self._show_progress)
-        searcher.finished.connect(lambda profile: self.on_friend_search_complete(profile, friend_name))
+        # Store friend_name in searcher for use in callback
+        searcher.friend_name = friend_name
+        # Use functools.partial instead of lambda to avoid closure issues
+        searcher.finished.connect(partial(self.on_friend_search_complete_with_thread, searcher))
         searcher.error.connect(self.on_friend_search_error)
         self.track_thread(searcher)
+        self.current_search_thread = searcher
         searcher.start()
 
-    def on_friend_search_complete(self, profile, friend_name):
-        """Handle friend search completion."""
+    def on_friend_search_complete_with_thread(self, searcher, profile):
+        """Handle friend search completion with thread reference."""
+        # Check if this is still the current search (might have been cancelled)
+        if self.current_search_thread != searcher:
+            logger.debug("Friend search completed but was cancelled, ignoring result")
+            return
+        
+        # Cancel any pending image loaders BEFORE displaying results
+        # This prevents them from trying to update deleted widgets
+        self._cancel_pending_image_loaders()
+        
+        friend_name = getattr(searcher, 'friend_name', 'Unknown')
         self._hide_progress()
+        self.current_search_thread = None  # Clear current search
         if profile:
             self.search_ui.display_search_results(profile, in_friend_context=True)
             self.content_title.setText(f"Profile: {friend_name}")
@@ -826,7 +914,13 @@ class MainWindow(QMainWindow):
 
     def on_friend_search_error(self, error_msg: str):
         """Handle friend search error."""
+        # Check if this is still the current search (might have been cancelled)
+        if self.current_search_thread is None:
+            logger.debug("Friend search error but was cancelled, ignoring result")
+            return
+        
         self._hide_progress()
+        self.current_search_thread = None  # Clear current search
         self.search_ui.show_search_error(f"Search error: {error_msg}")
         self.content_title.setText("Search Error")
 
@@ -869,6 +963,17 @@ class MainWindow(QMainWindow):
             self.search_ui.show_search_error("Please enter a username.")
             return
 
+        # Cancel any pending search thread to prevent crashes from deleted widgets
+        self._cancel_current_search()
+
+        # Cancel any pending image loaders to prevent crashes from deleted widgets
+        # Do this BEFORE showing progress to ensure all old widgets are cleaned up
+        self._cancel_pending_image_loaders()
+        
+        # Process any pending events to ensure widget deletions are processed
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
+
         self._show_progress(f"Searching for user '{username}'...")
 
         # Search in background thread
@@ -877,16 +982,33 @@ class MainWindow(QMainWindow):
         searcher.finished.connect(self.on_user_search_complete)
         searcher.error.connect(self.on_user_search_error)
         self.track_thread(searcher)
+        self.current_search_thread = searcher
         searcher.start()
 
     def on_user_search_complete(self, profile):
         """Handle user search completion."""
+        # Check if this is still the current search (might have been cancelled)
+        if self.current_search_thread is None:
+            logger.debug("Search completed but was cancelled, ignoring result")
+            return
+        
+        # Cancel any pending image loaders BEFORE displaying results
+        # This prevents them from trying to update deleted widgets
+        self._cancel_pending_image_loaders()
+        
         self._hide_progress()
+        self.current_search_thread = None  # Clear current search
         self.search_ui.display_search_results(profile)
 
     def on_user_search_error(self, error_msg: str):
         """Handle user search error with user-friendly message."""
+        # Check if this is still the current search (might have been cancelled)
+        if self.current_search_thread is None:
+            logger.debug("Search error but was cancelled, ignoring result")
+            return
+        
         self._hide_progress()
+        self.current_search_thread = None  # Clear current search
         user_message = (
             "Unable to search for user.\n\n"
             f"Error: {error_msg}\n\n"
@@ -895,15 +1017,123 @@ class MainWindow(QMainWindow):
         self.search_ui.show_search_error(user_message)
         logger.error(f"User search failed: {error_msg}")
 
+    def on_search_picture_loaded_safe(self, loader: ImageLoader, pixmap: QPixmap):
+        """Handle search result picture load with safety checks."""
+        # Check if widgets are still valid (quick check before doing anything)
+        if hasattr(self.search_ui, '_widget_valid') and not self.search_ui._widget_valid:
+            logger.debug("Widgets marked as invalid, ignoring image load")
+            if loader in self.active_image_loaders:
+                self.active_image_loaders.remove(loader)
+            return
+        
+        # Remove from active loaders first to prevent re-entry
+        if loader in self.active_image_loaders:
+            self.active_image_loaders.remove(loader)
+        
+        # Check if label still exists before accessing it
+        if not hasattr(loader, 'label_ref'):
+            return
+        
+        # Get the label from weak reference (returns None if deleted)
+        label_ref = loader.label_ref
+        if label_ref is None:
+            return
+        
+        label = label_ref()  # Dereference weak reference
+        if label is None:
+            # Widget was deleted, ignore
+            logger.debug("Search picture label was deleted before image loaded")
+            return
+        
+        try:
+            # Try to access a property to check if widget is still valid
+            try:
+                _ = label.objectName()  # This will raise RuntimeError if deleted
+            except RuntimeError:
+                # Widget was deleted, ignore
+                logger.debug("Search picture label was deleted before image loaded")
+                return
+            
+            # Double-check widget validity flag
+            if hasattr(self.search_ui, '_widget_valid') and not self.search_ui._widget_valid:
+                logger.debug("Widgets marked as invalid during image load, ignoring")
+                return
+            
+            if not hasattr(label, 'setPixmap'):
+                return
+            if not pixmap.isNull():
+                label.setPixmap(pixmap)
+            else:
+                label.setText("No Image")
+        except RuntimeError:
+            # Widget was deleted, ignore
+            logger.debug("Search picture label was deleted before image loaded")
+        except Exception as e:
+            # Any other error, log and ignore
+            logger.debug(f"Error updating search picture: {e}")
+
+    def on_search_picture_error_safe(self, loader: ImageLoader, error_msg: str):
+        """Handle search result picture load error with safety checks."""
+        # Check if widgets are still valid (quick check before doing anything)
+        if hasattr(self.search_ui, '_widget_valid') and not self.search_ui._widget_valid:
+            logger.debug("Widgets marked as invalid, ignoring image error")
+            if loader in self.active_image_loaders:
+                self.active_image_loaders.remove(loader)
+            return
+        
+        # Remove from active loaders first to prevent re-entry
+        if loader in self.active_image_loaders:
+            self.active_image_loaders.remove(loader)
+        
+        # Check if label still exists before accessing it
+        if not hasattr(loader, 'label_ref'):
+            return
+        
+        # Get the label from weak reference (returns None if deleted)
+        label_ref = loader.label_ref
+        if label_ref is None:
+            return
+        
+        label = label_ref()  # Dereference weak reference
+        if label is None:
+            # Widget was deleted, ignore
+            logger.debug("Search picture label was deleted before error handler ran")
+            return
+        
+        try:
+            # Try to access a property to check if widget is still valid
+            try:
+                _ = label.objectName()  # This will raise RuntimeError if deleted
+            except RuntimeError:
+                # Widget was deleted, ignore
+                logger.debug("Search picture label was deleted before error handler ran")
+                return
+            
+            # Double-check widget validity flag
+            if hasattr(self.search_ui, '_widget_valid') and not self.search_ui._widget_valid:
+                logger.debug("Widgets marked as invalid during error handling, ignoring")
+                return
+            
+            if not hasattr(label, 'setText'):
+                return
+            label.setText("No Image")
+            logger.debug(f"Search picture load failed: {error_msg}")
+        except RuntimeError:
+            # Widget was deleted, ignore
+            logger.debug("Search picture label was deleted before error handler ran")
+        except Exception as e:
+            # Any other error, log and ignore
+            logger.debug(f"Error handling search picture error: {e}")
+
     def on_search_picture_loaded(self, label: QLabel, pixmap: QPixmap):
-        """Handle search result picture load."""
+        """Handle search result picture load (legacy method for compatibility)."""
         if not pixmap.isNull():
             label.setPixmap(pixmap)
         else:
             label.setText("No Image")
 
     def on_search_picture_error(self, label: QLabel, error_msg: str):
-        """Handle search result picture load error."""
+        """Handle search result picture load error (legacy method for compatibility)."""
         label.setText("No Image")
         logger.debug(f"Search picture load failed: {error_msg}")
 
